@@ -1,0 +1,24 @@
+# Strict allowlist. Dockerfile.task continues using the separate root .dockerignore.
+**
+!Dockerfile
+!Dockerfile.dockerignore
+!pyproject.toml
+!README.md
+!uv.lock
+!requirements.lock
+!requirements.runtime.lock
+!contextlab/
+!contextlab/**
+!harness/
+!harness/**
+!config/
+!config/**
+!examples/
+!examples/**
+**/__pycache__/**
+**/*.pyc
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.pem
+**/*.key

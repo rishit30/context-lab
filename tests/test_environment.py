@@ -1,90 +1,132 @@
 """Local-key parsing and CLI boundaries; all credentials and providers are fake."""
+import os
 from pathlib import Path
 
 import pytest
 
 from harness import cli
-from harness.environment import load_anthropic_key
+from harness.environment import load_anthropic_key, load_typesafe_key
 
 KEY = "ANTHROPIC_API_KEY"
+TYPESAFE_KEY = "TYPESAFE_API_KEY"
+LOADERS = [(KEY, load_anthropic_key), (TYPESAFE_KEY, load_typesafe_key)]
 
 
 @pytest.fixture(autouse=True)
 def clear_key(monkeypatch):
     # Track an original absent value too: loader writes os.environ directly.
-    monkeypatch.setenv(KEY, "test-placeholder")
-    monkeypatch.delenv(KEY, raising=False)
+    for key, _ in LOADERS:
+        monkeypatch.setenv(key, "test-placeholder")
+        monkeypatch.delenv(key, raising=False)
 
 
+@pytest.mark.parametrize("key,loader", LOADERS)
 @pytest.mark.parametrize("assignment", [
-    "ANTHROPIC_API_KEY=fake-key",
-    " export ANTHROPIC_API_KEY = 'fake-key' # comment",
-    'ANTHROPIC_API_KEY="fake-key"# comment',
-    "ANTHROPIC_API_KEY=fake-key # comment",
+    "{key}=fake-key",
+    " export {key} = 'fake-key' # comment",
+    '{key}="fake-key"# comment',
+    "{key}=fake-key # comment",
 ])
-def test_loads_only_supported_key(tmp_path, monkeypatch, assignment):
+def test_loads_only_supported_key(tmp_path, monkeypatch, assignment, key, loader):
     path = tmp_path / ".env"
-    path.write_text("# comment\n\nOTHER_SECRET=ignore-me\n" + assignment + "\n")
+    other_key = TYPESAFE_KEY if key == KEY else KEY
+    path.write_text(
+        "# comment\n\nOTHER_SECRET=ignore-me\n"
+        + f'{other_key}="malformed ignored value\n'
+        + assignment.format(key=key) + "\n"
+    )
     monkeypatch.delenv("OTHER_SECRET", raising=False)
-    assert load_anthropic_key(path)
-    import os
-    assert os.environ[KEY] == "fake-key"
+    assert loader(path)
+    assert os.environ[key] == "fake-key"
+    assert other_key not in os.environ
     assert "OTHER_SECRET" not in os.environ
 
 
+@pytest.mark.parametrize("key,loader", LOADERS)
 @pytest.mark.parametrize("exported", ["already-exported", ""])
-def test_exported_value_wins_without_reading_file(monkeypatch, exported):
-    monkeypatch.setenv(KEY, exported)
+def test_exported_value_wins_without_reading_file(monkeypatch, exported, key, loader):
+    monkeypatch.setenv(key, exported)
     monkeypatch.setattr(Path, "read_text", lambda *a, **kw: pytest.fail("Must not read file"))
-    assert not load_anthropic_key(Path("unused.env"))
+    assert not loader(Path("unused.env"))
+    assert os.environ[key] == exported
 
 
-def test_missing_or_unrelated_file_does_not_set_key(tmp_path):
-    import os
-    assert not load_anthropic_key(tmp_path / "missing")
+@pytest.mark.parametrize("key,loader", LOADERS)
+def test_missing_or_unrelated_file_does_not_set_key(tmp_path, key, loader):
+    assert not loader(tmp_path / "missing")
     path = tmp_path / ".env"
-    path.write_text("OTHER=broken '\nANTHROPIC_API_KEY_OTHER=ignored\n")
-    assert not load_anthropic_key(path)
-    assert KEY not in os.environ
+    path.write_text(f"OTHER=broken '\n{key}_OTHER=ignored\n")
+    assert not loader(path)
+    assert key not in os.environ
 
 
-def test_shell_and_variable_syntax_remain_literal(tmp_path):
-    import os
+@pytest.mark.parametrize("key,loader", LOADERS)
+@pytest.mark.parametrize("quote", ["", "'", '"'])
+def test_shell_and_variable_syntax_remain_literal(tmp_path, monkeypatch, key, loader, quote):
+    monkeypatch.chdir(tmp_path)
     path = tmp_path / ".env"
-    value = "$(touch must-not-exist)-${HOME}-`whoami`"
-    path.write_text(f"{KEY}='{value}'\n")
-    assert load_anthropic_key(path)
-    assert os.environ[KEY] == value
+    value = "$(touch must-not-exist)-${HOME}-`whoami`-\\n"
+    path.write_text(f"{key}={quote}{value}{quote}\n")
+    assert loader(path)
+    assert os.environ[key] == value
     assert not (tmp_path / "must-not-exist").exists()
 
 
+@pytest.mark.parametrize("key,loader", LOADERS)
 @pytest.mark.parametrize("entry", [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_API_KEY=",
-    "ANTHROPIC_API_KEY= # only a comment",
-    'ANTHROPIC_API_KEY="fake-sensitive-value',
-    'ANTHROPIC_API_KEY="fake-sensitive-value" extra',
-    "ANTHROPIC_API_KEY=fake-sensitive-value\nANTHROPIC_API_KEY=duplicate",
-    "ANTHROPIC_API_KEY=fake-sensitive-value\x00",
+    "{key}",
+    "{key}=",
+    "{key}= # only a comment",
+    '{key}="fake-sensitive-value',
+    '{key}="fake-sensitive-value" extra',
+    "{key}=fake-sensitive-value\n{key}=duplicate",
+    "{key}=fake-sensitive-value\nexport {key} = 'duplicate'",
+    "{key}=fake-sensitive-value\x00",
 ])
-def test_malformed_errors_do_not_include_values_or_partially_set_key(tmp_path, entry):
-    import os
+def test_malformed_errors_do_not_include_values_or_partially_set_key(tmp_path, entry, key, loader):
     path = tmp_path / ".env"
-    path.write_text(entry)
+    path.write_text(entry.format(key=key))
     with pytest.raises(ValueError) as caught:
-        load_anthropic_key(path)
+        loader(path)
+    assert str(caught.value) == (
+        f"Invalid {key} entry in .env; use one single-line KEY=value assignment."
+    )
     assert "fake-sensitive-value" not in str(caught.value)
     assert "duplicate" not in str(caught.value)
-    assert KEY not in os.environ
+    assert key not in os.environ
 
 
-def test_unreadable_file_has_generic_error(tmp_path, monkeypatch):
+@pytest.mark.parametrize("key,loader", LOADERS)
+@pytest.mark.parametrize("error", [PermissionError, UnicodeError])
+def test_unreadable_file_has_generic_error(tmp_path, monkeypatch, key, loader, error):
     def denied(*args, **kwargs):
-        raise PermissionError("fake-sensitive-value")
+        raise error("fake-sensitive-value")
     monkeypatch.setattr(Path, "read_text", denied)
     with pytest.raises(ValueError, match="Cannot read local .env credential file") as caught:
-        load_anthropic_key(tmp_path / ".env")
+        loader(tmp_path / ".env")
     assert "fake-sensitive-value" not in str(caught.value)
+    assert caught.value.__suppress_context__
+    assert key not in os.environ
+
+
+def test_each_loader_independently_selects_its_own_assignment(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text(f"{KEY}=fake-anthropic\n{TYPESAFE_KEY}=fake-typesafe\n")
+    assert load_typesafe_key(path)
+    assert os.environ[TYPESAFE_KEY] == "fake-typesafe"
+    assert KEY not in os.environ
+    assert load_anthropic_key(path)
+    assert os.environ[KEY] == "fake-anthropic"
+    assert os.environ[TYPESAFE_KEY] == "fake-typesafe"
+
+
+def test_private_parser_rejects_non_whitelisted_names_without_reading(tmp_path, monkeypatch):
+    from harness.environment import _load_key
+
+    monkeypatch.setattr(Path, "read_text", lambda *a, **kw: pytest.fail("Must not read file"))
+    with pytest.raises(ValueError, match="^Unsupported local credential name\\.$") as caught:
+        _load_key(tmp_path / ".env", "fake-sensitive-name")
+    assert "fake-sensitive-name" not in str(caught.value)
 
 
 def wire_cli(monkeypatch, tmp_path):

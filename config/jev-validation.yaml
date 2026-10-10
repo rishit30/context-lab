@@ -1,0 +1,28 @@
+# Fresh comparison after shared tool-error recovery, schema and prompt fixes.
+# Real calls require explicit approval of the printed prices, matrix and $9 cap.
+arms: [baseline, contextlab, headroom]
+tasks: [file_audit_short]
+repeats: 1
+session_cap_usd: '3.00'
+experiment_cap_usd: '9.00'
+max_model_calls: 48
+max_output_tokens: 4096
+max_input_tokens: 100000
+threshold_tokens: 12000
+threshold_keep: 3
+docker_image: contextlab-task:local
+cache_mode: disabled
+phase_boundaries: true
+decision_engine: jev
+jev:
+  model: jev-1.13.0
+  input_per_million: '0.042'
+  output_per_million: '0'
+  pricing_source: https://docs.typesafe.ai/models
+  verified_at: '2026-10-10'
+  max_calls_per_session: 8
+  max_state_bytes: 24000
+  max_candidates: 8
+  keep_threshold: 0.15
+  timeout_seconds: 10
+  reservation_input_tokens: 65536

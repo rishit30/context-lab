@@ -112,6 +112,7 @@ class ViewState(Record):
     levels: dict[str, Level] = Field(default_factory=dict)
     pinned_ids: tuple[str, ...] = ()
     last_boundary_id: str = ""
+    duplicate_sources: dict[str, str] = Field(default_factory=dict)
 
 
 class ProjectionResult(Record):
@@ -123,6 +124,9 @@ class ProjectionResult(Record):
     fallback: bool = False
     error: str | None = None
     estimated_tokens_saved: int = 0
+    no_op_reason: str | None = None
+    semantic_decision: dict[str, Any] | None = None
+    exact_duplicate_retirements: dict[str, str] = Field(default_factory=dict)
 
 
 class RunResult(Record):
@@ -138,5 +142,8 @@ class RunResult(Record):
     rebuilds: int = 0
     latency_ms: float = 0
     usage: Usage = Field(default_factory=Usage)
+    decision_calls: int = Field(default=0, ge=0)
+    decision_cost_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    decision_usage: Usage = Field(default_factory=Usage)
     error: str | None = None
     notes: str = ""

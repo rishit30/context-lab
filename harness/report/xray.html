@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>ContextLab · Offline context analysis</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b3a; --muted:#536573; --line:#d8e0e4; --paper:#f5f6f3; --teal:#176458; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.6 system-ui,sans-serif; }
+    main { max-width:1180px; margin:auto; padding:48px 28px 72px; }
+    .eyebrow { color:var(--teal); font-size:12px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
+    h1 { font-size:clamp(30px,5vw,48px); letter-spacing:-.04em; line-height:1.15; margin:12px 0 20px; }
+    h2 { margin:32px 0 12px; font-size:22px; }
+    p { max-width:85ch; margin:10px 0; }
+    .muted { color:var(--muted); }
+    .notice { padding:18px 22px; border-left:4px solid var(--teal); background:#e6eeea; margin:24px 0; }
+    .warning { border-color:#a26014; background:#fff1db; }
+    .error { border-color:#a83232; background:#ffe9e6; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:24px 0; }
+    .stat { background:#fff; border:1px solid var(--line); padding:20px; }
+    .stat b { display:block; font-size:30px; line-height:1.2; margin:6px 0; font-variant-numeric:tabular-nums; }
+    .stat span { color:var(--muted); font-size:13px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); background:#fff; }
+    table { border-collapse:collapse; width:100%; font-size:14px; }
+    th,td { padding:12px 14px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { font-size:12px; font-weight:700; color:var(--muted); background:#edf1ef; }
+    td { font-variant-numeric:tabular-nums; }
+    tr:last-child td { border-bottom:0; }
+    .id { max-width:360px; overflow-wrap:anywhere; }
+    details { padding:16px 0; }
+    summary { cursor:pointer; font-weight:650; }
+    a { color:var(--teal); }
+    li { margin:8px 0; max-width:95ch; }
+    footer { border-top:1px solid var(--line); padding-top:18px; margin-top:40px; color:var(--muted); font-size:13px; }
+    @media print { main { padding:0; } .table-wrap { overflow:visible; } details { break-inside:avoid; } }
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">ContextLab / Offline evidence</div>
+  <h1>Where does repeated context accumulate?</h1>
+  <p class="muted">Source run: <strong>{{ source_name }}</strong>. Current-policy replay of saved baseline requests. This report makes no provider requests and preserves the source run.</p>
+  <div class="notice">
+    <strong>Candidate content is an opportunity to investigate.</strong>
+    <p>The message-view share measures bytes marked as candidates by lifecycle rules. Saved message views omit system prompts and tool definitions. This is not measured model savings, proof of irrelevance, or a prediction that an intervention will preserve answer quality.</p>
+  </div>
+  {% set s = result.get('summary', {}) %}
+  <div class="stats">
+    <div class="stat"><span>Baseline calls reconstructed</span><b>{{ s.get('reconstructed_calls', 0) }} / {{ s.get('baseline_calls', 0) }}</b><span>Missing evidence stays unknown.</span></div>
+    <div class="stat"><span>Estimated candidate message share</span><b>{{ s.get('estimated_candidate_context_share') | percent }}</b><span>Candidate bytes / message-view bytes</span></div>
+    <div class="stat"><span>Input cost in saved receipts</span><b>{{ s.get('actual_input_cost_usd') | money }}</b><span>Historical cost; no new spend</span></div>
+  </div>
+  {% if not result.get('ok') %}<div class="notice error"><strong>Analysis incomplete or invalid.</strong> Resolve the errors below before drawing conclusions.</div>{% endif %}
+  {% if not s.get('coverage_complete') %}<div class="notice warning"><strong>Coverage is incomplete.</strong> Results for reconstructable calls do not establish the share across the whole run.</div>{% endif %}
+  {% for label, kind in [('Errors', 'error'), ('Warnings', 'warning')] %}
+    {% set entries = result.get(kind ~ 's', []) %}
+    {% if entries %}<div class="notice {{ kind }}"><strong>{{ label }}</strong><ul>{% for entry in entries %}<li>{{ entry }}</li>{% endfor %}</ul></div>{% endif %}
+  {% endfor %}
+  <h2>By task</h2>
+  <p class="muted">Live and simulated observations stay separate. A zero means no candidates were identified by the supported rules in reconstructed calls; it does not establish that the context was optimal.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Task / mode</th><th scope="col">Calls reconstructed</th><th scope="col">Candidate message share</th><th scope="col">Share with boundary evidence</th><th scope="col">Historical input cost</th><th scope="col">Candidate input allocation estimate</th></tr></thead>
+    <tbody>{% for row in result.get('per_task', []) %}<tr>
+      <td class="id"><strong>{{ row.get('task_id', 'Unknown') }}</strong><br>{{ row.get('mode', 'unknown') }}</td>
+      <td>{{ row.get('reconstructed_calls', 0) }} / {{ row.get('baseline_calls', 0) }}</td>
+      <td>{{ row.get('estimated_candidate_context_share') | percent }}</td>
+      <td>{{ row.get('verified_boundary_candidate_context_share') | percent }}</td>
+      <td>{{ row.get('actual_input_cost_usd') | money }}</td>
+      <td>{% set bounds = row.get('priced_candidate_input_estimate_usd') %}{% if bounds %}{{ bounds.get('lower') | money }} – {{ bounds.get('upper') | money }}{% else %}Unknown{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="6">No baseline task evidence is available.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="muted">Candidate allocation estimates use a token heuristic and possible assignments across observed input-price buckets. Cache locations are unknown. These amounts exclude intervention, decision, recall and output costs, and are not achievable savings.</p>
+  <p class="muted">Boundary evidence is reported separately. A recorded phase number is insufficient: a matched test transition or a validated public-completion marker is required. Unknown means the saved trace cannot establish that timing.</p>
+  <h2>By session</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Session</th><th scope="col">Mode</th><th scope="col">Calls reconstructed</th><th scope="col">Candidate message share</th><th scope="col">Coverage</th></tr></thead>
+    <tbody>{% for row in result.get('per_session', []) %}<tr>
+      <td class="id">{{ row.get('session_id', 'Unknown') }}</td><td>{{ row.get('mode', 'unknown') }}</td>
+      <td>{{ row.get('reconstructed_calls', 0) }} / {{ row.get('baseline_calls', 0) }}</td>
+      <td>{{ row.get('estimated_candidate_context_share') | percent }}</td><td>{{ 'Complete' if row.get('coverage_complete') else 'Incomplete' }}</td>
+    </tr>{% else %}<tr><td colspan="5">No baseline sessions found.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <details><summary>Call-level evidence and exclusions</summary>
+    <div class="table-wrap"><table><thead><tr><th scope="col">Session / sequence</th><th scope="col">Status</th><th scope="col">Boundary evidence</th><th scope="col">Reasons / limits</th></tr></thead>
+    <tbody>{% for row in result.get('calls', []) %}<tr>
+      <td class="id">{{ row.get('session_id', 'Unknown') }} / {{ row.get('seq', '?') }}</td><td>{{ row.get('status', 'unknown') }}</td>
+      <td>{{ row.get('boundary_source') or 'No evidenced boundary' }}</td><td>{{ row.get('reasons', []) | join('; ') }}</td>
+    </tr>{% else %}<tr><td colspan="4">No call evidence.</td></tr>{% endfor %}</tbody></table></div>
+  </details>
+  <h2>Interpretation and limits</h2>
+  <ul>{% for item in result.get('limitations', []) %}<li>{{ item }}</li>{% endfor %}</ul>
+  <footer>No inference was executed to generate this report. It contains derived metrics rather than original prompts or file contents. <a href="xray.json">Download the analysis JSON</a>.</footer>
+</main></body></html>

@@ -42,10 +42,12 @@ def render_chunk(chunk: Chunk, level: Level) -> str:
 
 
 def render_view(
-    messages: Sequence[Message], chunks: Sequence[Chunk], levels: Mapping[str, Level]
+    messages: Sequence[Message], chunks: Sequence[Chunk], levels: Mapping[str, Level],
+    duplicate_sources: Mapping[str, str] | None = None,
 ) -> list[Message]:
     rendered = deepcopy(list(messages))
     by_call: dict[str, Chunk] = {}
+    by_id = {chunk.id: chunk for chunk in chunks}
     for archived_chunk in chunks:
         if archived_chunk.tool_call_id in by_call:
             raise ValueError(f"ambiguous chunk mapping for tool call {archived_chunk.tool_call_id}")
@@ -67,7 +69,20 @@ def render_view(
                 )
             if block["content"] != chunk.content:
                 raise ValueError(f"archive does not match canonical tool result for {chunk.id}")
-            block["content"] = render_chunk(chunk, levels[chunk.id])
+            source_id = (duplicate_sources or {}).get(chunk.id)
+            if source_id:
+                source = by_id.get(source_id)
+                if (source is None or levels.get(source_id, "full") != "full"
+                        or source.content != chunk.content or source.seq <= chunk.seq
+                        or levels[chunk.id] != "hidden"):
+                    raise ValueError("invalid exact-duplicate anchor")
+                block["content"] = (
+                    f"[Exact duplicate output: the identical original text remains fully visible "
+                    f"in later tool result {source.tool_call_id}; same file path, version and read range. "
+                    f'Original observation at /context/{chunk.id}.txt: recall("{chunk.id}", offset=0, limit=80).]'
+                )
+            else:
+                block["content"] = render_chunk(chunk, levels[chunk.id])
             replacements.add(chunk.id)
     expected = {chunk_id for chunk_id, level in levels.items() if level != "full"}
     if expected - replacements:
