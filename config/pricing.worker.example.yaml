@@ -1,0 +1,11 @@
+# Explicit opt-in compatibility example, never selected automatically.
+# This pinned model is legacy; verify current availability and your account prices
+# before approving a live run. Replacing it requires a fresh comparison plan.
+model: claude-haiku-4-5-20251001
+input_per_million: '1'
+cache_write_5m_per_million: '1.25'
+cache_write_1h_per_million: '2'
+cache_read_per_million: '0.10'
+output_per_million: '5'
+source: https://platform.claude.com/docs/en/models/haiku-4-5/overview
+verified_at: '2026-10-10'

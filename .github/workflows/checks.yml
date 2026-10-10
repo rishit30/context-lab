@@ -24,3 +24,8 @@ jobs:
         run: |
           python -m harness demo --output "$RUNNER_TEMP/contextlab-demo"
           python -m harness xray "$RUNNER_TEMP/contextlab-demo" --output "$RUNNER_TEMP/contextlab-xray"
+      - name: Verify bounded routing without credentials or inference
+        run: |
+          python -m examples.routing_agent plan --worker-pricing config/pricing.worker.example.yaml --routing-engine jev
+          python -m examples.routing_agent demo --output "$RUNNER_TEMP/contextlab-routing"
+          python -m harness audit "$RUNNER_TEMP/contextlab-routing"

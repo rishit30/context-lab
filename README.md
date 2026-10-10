@@ -8,7 +8,13 @@ ContextLab is a context lifecycle controller and evaluation harness for tool-usi
 
 **Offline context analysis:** `python -m harness xray RUN_DIRECTORY --output NEW_REPORT_DIRECTORY` replays saved baseline requests and exports a portable evidence report without inference. It separates rule-candidate message share, receipt-based input costs, conditional estimates and boundary coverage. Candidates are not proven waste or savings. See [offline validation](docs/offline-validation.md) and the [full requirements checklist](docs/requirements-status.md).
 
-**First live pilot:** all **9/9 sessions passed**, using **103 successful model calls** and **$0.53146455** in usage-derived list-price cost. No ContextLab compaction or recall occurred in that pilot: the short coding tasks never produced the required fail-to-pass boundary. It verified live integration. Routing, learned recall, long-conversation memory and the HTTP gateway remain later milestones. See [the historical M0 gate](docs/gates/M0.md) and `runs/live-001/report.html`.
+**First live pilot:** all **9/9 sessions passed**, using **103 successful model calls** and **$0.53146455** in usage-derived list-price cost. No ContextLab compaction or recall occurred in that pilot: the short coding tasks never produced the required fail-to-pass boundary. It verified live integration. Learned recall, long-conversation memory and the HTTP gateway remain later milestones. See [the historical M0 gate](docs/gates/M0.md) and `runs/live-001/report.html`.
+
+**Read-only routing:** opt-in bounded evidence delegation now supplements compaction.
+The [five-configuration demonstration](docs/routing.md) compares baseline,
+compaction-only, routing-only, combined ContextLab and Headroom using the same
+inputs and tools. It runs offline with explicit simulation providers, exercises
+quote validation and fallback, and makes no real savings or quality claim.
 
 **Docker validation:** `contextlab-task:local` passed 17 real-container checks on the development machine. Start Docker and build the image on your own machine before live runs. See [local Docker readiness](docs/local-docker.md) for the validation record and commands. The readiness check below verifies local configuration; it does not authenticate with Anthropic or make model requests.
 

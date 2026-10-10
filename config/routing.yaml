@@ -1,2 +1,2 @@
 enabled: false
-reason: Delegation follows the compaction evidence gate; no model routing is active in M0.
+reason: Opt-in read-only evidence routing is available through SessionConfig and examples.routing_agent; live acceptance remains unverified.

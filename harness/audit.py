@@ -17,7 +17,7 @@ from contextlab.ledger.store import ModelCall
 from contextlab.providers.jev import JevError, normalize_jev_usage
 
 TOKENS = tuple(Usage.model_fields)
-ARMS = {"baseline", "threshold_edit", "contextlab", "headroom"}
+ARMS = {"baseline", "threshold_edit", "cl_compact_only", "cl_route_only", "contextlab", "headroom"}
 PURPOSES = {"main", "decision", "delegate", "triage", "summary"}
 
 
@@ -136,7 +136,17 @@ class _Audit:
             expected = Pricing.model_validate(self.plan["pricing"])
             self.check(call.pricing == expected, f"{label}: saved pricing differs from plan")
             self.check(call.model == self.plan.get("model"), f"{label}: main model differs from plan")
-        config = self.plan.get("config", {})
+        config = self.plan.get("settings", {}).get(call.session_id, self.plan.get("config", {}))
+        if self.plan.get("settings"):
+            planned_rates = (config.get("routing", {}).get("worker_pricing")
+                             if call.purpose == "delegate" else config.get("pricing")
+                             if call.purpose == "main" else None)
+            if call.purpose in {"main", "delegate"}:
+                self.check(planned_rates is not None and call.pricing == Pricing.model_validate(planned_rates),
+                           f"{label}: model or price snapshot differs from session plan")
+            if call.purpose == "delegate":
+                self.check(config.get("routing", {}).get("enabled") is True,
+                           f"{label}: delegation was disabled in the plan")
         jev = config.get("jev", {})
         if call.raw_usage.get("provider") == "typesafe" and jev:
             rates = call.pricing
@@ -151,11 +161,12 @@ class _Audit:
         if config.get("cache_mode") == "disabled":
             self.check(call.usage.cache_read_tokens == call.usage.cache_write_5m_tokens
                        == call.usage.cache_write_1h_tokens == 0, f"{label}: nonzero cache usage with caching disabled")
-        if call.purpose == "main":
+        if call.purpose in {"main", "delegate"}:
+            limits = config.get("routing", {}) if call.purpose == "delegate" else config
             for name, count in (("max_input_tokens", call.usage.total_input_tokens),
                                 ("max_output_tokens", call.usage.output_tokens)):
-                if name in config:
-                    self.check(count <= config[name], f"{label}: usage exceeds planned {name}")
+                if name in limits:
+                    self.check(count <= limits[name], f"{label}: usage exceeds planned {name}")
 
     def result(self, session: dict, calls: list[ModelCall], reserved: Decimal, label: str) -> None:
         path = (self.directory / session["id"] / "result.json").resolve()
@@ -163,11 +174,16 @@ class _Audit:
             self.errors.append(f"{label}: result path escapes run directory")
             return
         if not path.exists():
-            self.warnings.append(f"{label}: no result.json; result totals not checked")
-            return
+            path = (self.directory / f"{session['id']}.json").resolve()
+            if not path.is_relative_to(self.directory) or not path.exists():
+                self.warnings.append(f"{label}: no result.json; result totals not checked")
+                return
         result = self.read_json(path, f"{label} result")
         if result is None:
             return
+        if session["task_id"] == "application-agent":
+            result = {**result, "cost_usd": result.get("total_cost_usd"),
+                      "turns": result.get("provider_calls")}
         total = _stats()
         for call in calls:
             _add(total, call)
@@ -196,6 +212,12 @@ class _Audit:
             if "decision_cost_usd" in result and reserved == 0:
                 self.check(money(result["decision_cost_usd"]) == sum((call.cost_usd for call in decisions), Decimal(0)),
                            f"{label}: result decision cost differs")
+            delegates = [call for call in calls if call.purpose == "delegate"]
+            if "delegate_calls" in result:
+                self.check(result["delegate_calls"] == len(delegates), f"{label}: result delegate count differs")
+            if "delegate_cost_usd" in result and reserved == 0:
+                self.check(money(result["delegate_cost_usd"]) == sum((call.cost_usd for call in delegates), Decimal(0)),
+                           f"{label}: result delegate cost differs")
         except (KeyError, TypeError, ValueError):
             self.errors.append(f"{label}: malformed result accounting fields")
 
@@ -326,7 +348,11 @@ class _Audit:
                                if item["session_id"] in matched and item["status"] == "reserved"), Decimal(0))
                 cap = money(row["cap_usd"])
                 self.check(spent + pending <= cap, f"Budget #{index}: spend plus outstanding reservations exceeds cap")
-                config = self.plan.get("config", {})
+                settings = self.plan.get("settings", {})
+                config = settings.get(row["scope_id"], self.plan.get("config", {}))
+                if scope == "experiment" and settings:
+                    caps = {money(item["experiment_cap_usd"]) for item in settings.values()}
+                    self.check(caps == {cap}, f"Budget #{index}: experiment cap differs from session plans")
                 key = "session_cap_usd" if scope == "session" else "experiment_cap_usd"
                 if key in config:
                     self.check(cap == money(config[key]), f"Budget #{index}: cap differs from saved plan")
@@ -339,6 +365,15 @@ class _Audit:
         for index, session in enumerate(sessions.values(), 1):
             label = f"Session #{index}"
             calls = [call for call in valid_calls.values() if call.session_id == session["id"]]
+            config = self.plan.get("settings", {}).get(session["id"])
+            if config is not None:
+                for key in ("arm", "mode"):
+                    self.check(config.get(key) == session[key], f"{label}: identity differs from session plan")
+                for purpose, limit in (("main", config.get("max_model_calls")),
+                                       ("delegate", config.get("routing", {}).get("max_calls_per_session"))):
+                    if limit is not None:
+                        self.check(sum(call.purpose == purpose for call in calls) <= limit,
+                                   f"{label}: {purpose} call limit exceeded")
             pending = sum((reservation_amounts.get(row["call_id"], Decimal(0)) for row in reservations.values()
                            if row["session_id"] == session["id"] and row["status"] == "reserved"), Decimal(0))
             self.check(sorted(call.seq for call in calls) == list(range(len(calls))), f"{label}: call sequence is not contiguous")

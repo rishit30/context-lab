@@ -173,6 +173,27 @@ without double counting. These are local SDK checks, not new provider calls.
 Sources: [upstream metadata](https://github.com/headroomlabs-ai/headroom/blob/main/pyproject.toml),
 [integration guide](https://github.com/headroomlabs-ai/headroom/blob/main/wiki/integration-guide.md).
 
+### Read-only routing contracts inspected in this revision
+
+The installed `langchain_core/tools/base.py` exposes `InjectedToolCallId`. It is
+excluded from the model-facing tool schema and populated from the enclosing
+tool-call envelope. ContextLab uses that ID for durable delegation idempotency.
+The same installed ChatAnthropic token-count and receipt contracts described
+above apply to the bounded worker, with retries disabled and no tools bound.
+
+Worker compatibility example pricing was checked against the official
+[Haiku 4.5 reference](https://platform.claude.com/docs/en/models/haiku-4-5/overview)
+on 2026-10-10: pinned `claude-haiku-4-5-20251001`, $1/M input and $5/M output,
+$1.25/M five-minute cache writes, $2/M one-hour writes and $0.10/M reads. This is
+a legacy model; availability must be rechecked before a live plan is approved.
+The configuration is never selected automatically. The main model retains its
+separate explicit pricing snapshot.
+
+Routing optionally reuses the verified TypeSafe HTTP transport for a distinct
+bounded suitability question. Public model documentation was rechecked, but no
+authenticated requests, token counts or inference were made for this revision.
+No live routing quality or savings acceptance is implied by SDK inspection.
+
 ## Deferred integrations
 
 ### Deep Agents filesystem
