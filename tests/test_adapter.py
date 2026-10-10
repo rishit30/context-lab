@@ -135,7 +135,7 @@ def test_arm_invariants_do_not_depend_on_workspace_or_recall(tmp_path):
 
 def test_unsupported_competitor_arm_is_not_faked(tmp_path):
     with pytest.raises(NotImplementedError):
-        build_agent(model=model(), workspace=Workspace(tmp_path), arm="headroom")
+        build_agent(model=model(), workspace=Workspace(tmp_path), arm="deepagents")
 
 
 def test_adapter_falls_back_on_ingestion_failure_without_retrying_provider(tmp_path):

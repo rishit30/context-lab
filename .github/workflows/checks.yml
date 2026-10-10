@@ -1,0 +1,26 @@
+name: Python checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned test environment
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+      - run: python -m pytest -q
+      - run: python -m ruff check .
+      - run: python -m mypy --strict contextlab/core
+      - name: Verify the real-agent plan without credentials or inference
+        run: python -m examples.file_agent plan
+      - name: Exercise the offline demo and context analysis
+        run: |
+          python -m harness demo --output "$RUNNER_TEMP/contextlab-demo"
+          python -m harness xray "$RUNNER_TEMP/contextlab-demo" --output "$RUNNER_TEMP/contextlab-xray"

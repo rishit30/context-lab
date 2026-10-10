@@ -4,7 +4,9 @@ Checked on 2026-10-10. Installed sources take precedence over floating documenta
 No provider completion or token-count request was made during the initial implementation. Automated
 tests use local objects and fake model responses. A subsequent approved pilot completed 103 successful
 model calls and nine passing sessions; see `docs/gates/M0.md`. This file records inspected SDK contracts,
-while the gate distinguishes live validation from compaction effectiveness, which remains unproven.
+while the gates distinguish integration from effectiveness. A second approved 85-call comparison
+verified active compaction and correct retrieval on the short file-audit task; general efficiency
+remains unproven. See `docs/gates/M1-comparison.md`.
 
 ## Installed and used
 
@@ -14,8 +16,44 @@ while the gate distinguishes live validation from compaction effectiveness, whic
 | `langchain-core` | 1.6.9 | Typed messages, `BaseTool`, `@tool`, fake model for offline graph tests |
 | `langchain-anthropic` | 1.7.5 | `ChatAnthropic`, `AnthropicPromptCachingMiddleware`, usage conversion and token counting source |
 | `anthropic` | 1.13.0 | Transitive provider client; model calls are made through LangChain |
+| `headroom-ai` (optional) | 0.40.0 | Public `compress` / `CompressConfig`, verified lossless agent profile, offline tokenizer registration |
 
 Versions are pinned in `pyproject.toml`; the environment lock records transitive dependencies.
+
+### TypeSafe Jev decision service
+
+Verified on 2026-10-10 against the official [HTTP contract](https://docs.typesafe.ai/api),
+[OpenAPI schema](https://api.typesafe.ai/openapi.json), and [model reference](https://docs.typesafe.ai/models).
+The optional adapter uses Python's standard HTTPS client directly, with no redirects or retries;
+no additional SDK dependency is required. Authenticated `GET https://api.typesafe.ai/v1/models`
+succeeded and listed `jev-latest` and `jev-preview`. Subsequently, the explicitly approved
+pilot `runs/jev-pilot-001/` completed one real inference with pinned `jev-1.13.0`: 6,486 input
+tokens, 58 zero-priced output tokens, $0.000272412. The full agent task failed later because
+Claude invented invalid recall IDs. After the shared agent fix, an approved three-arm comparison
+in `runs/jev-validation-001/` passed all arms. ContextLab made two valid Jev requests with 13,156
+input tokens and 116 zero-priced output tokens, costing $0.000552552. Both assessments retained
+all evaluated candidates; no context was removed. API compatibility and successful full-task
+integration are verified; optimization benefit remains unproven.
+
+Inference is `POST https://api.typesafe.ai/v1/systemone`, with bearer `TYPESAFE_API_KEY` and
+JSON `{model, state, questions}`. The configured version is `jev-1.13.0`; the official reference
+states that versioned IDs work even when model listing shows only aliases. Each candidate has
+a `noul` question with explicit instructions and true/false criteria. Its answer is a probability
+in `[0,1]`, not a separate confidence field. The adapter requires the pinned response model,
+exact question IDs, finite probabilities, and nonnegative integer input/output usage.
+
+Price: $0.042/M billable input tokens; output is free. Shared state is billed once for a batch.
+Published limits are 64k total request tokens and 32k for state plus the longest question.
+The provider exposes no verified count endpoint or tokenizer. The local gate uses complete
+candidate text, a 24,000-byte state limit, at most eight questions and a 32,000-byte JSON body
+limit. It reserves 65,536 tokens per request against the existing experiment cap. These are
+conservative admission/reservation policies, not measured token counts. Real receipts settle
+actual fees; unknown usage retains the reservation charge and blocks the experiment.
+
+Jev requests include current/prior user instructions and selected tool results. Full request
+and receipt records remain in the local gitignored ledger for audit. Keys and provider error
+bodies are excluded. Probability thresholds have not been calibrated on held-out tasks.
+This addition does not retroactively change any result from the earlier rules-only pilots.
 
 Other direct dependency pins verified from the installed environment: Pydantic 2.14.0
 (record/config validation), PyYAML 6.0.3 (safe configuration loading), Jinja2 3.1.6
@@ -104,24 +142,38 @@ are byte heuristics and are never substituted for measured token usage in result
 
 Reference: [Anthropic token counting](https://platform.claude.com/docs/en/build-with-claude/token-counting).
 
-## Evaluated but not installed as experiment arms
-
 ### Headroom
 
-The upstream project metadata identifies `headroom-ai` and Apache-2.0. Current main metadata
-advertises version 0.40.0 and its integration guide documents `HeadroomChatModel` wrapping a
-LangChain model. This is a real competitor with compression and recoverability; it is not merely
-a threshold-clearing implementation.
+The optional `headroom` extra pins `headroom-ai==0.40.0`. The adapter calls the genuine public
+`headroom.compress` API before shared LangChain metering; it does not replace the provider model.
+Its explicit `agent_lossless_offline` profile uses `CompressConfig(mode='agent',
+kompress_model='disabled', verify_lossless=True)`, retaining upstream tool protections.
+System/user compression and CCR are disabled. No auxiliary inference occurs; Headroom recall is
+not applicable to this profile. `configuration()` records every option in the approved plan.
 
-Its current core dependency tree includes LiteLLM and a native AST utility; the LangChain extra
-also adds another provider integration. We did not install or validate that wrapper against the
-pinned Anthropic stack. `build_agent(arm='headroom')` raises a clear unavailable error. No performance
-claim against Headroom is justified by this implementation. Add a pinned optional dependency and
-verify bind-tools, Anthropic cache controls, usage propagation, recall, and request fidelity before
-enabling a genuine arm.
+Installed source and socket-blocked tests verified: `ModelRequest.override` carries only copied
+tool-result text; canonical history, tool IDs, opaque blocks, system prompt and tool schemas remain
+unchanged; shared metering receives the transformed request and original provider usage. Projection
+errors forward the original request once and are recorded. Environment controls disable telemetry,
+update checks, ML downloads and persistent CCR/TOIN stores. The official estimating tokenizer is
+registered explicitly to avoid vocabulary downloads; its counts are estimates, never billing data.
+
+An offline smoke test compressed structured `run_tests` JSON from 2,467 to 352 estimated tokens,
+but genuine `Workspace.read_file` envelopes remained unchanged. Upstream 0.40 defaults protect all
+`read_file` results (`protect_recent_reads_fraction=0.0`), including older reads. Tests exercise that
+behavior rather than renaming tools or weakening upstream protection to produce favorable numbers.
+This benchmark evaluates this exact profile on file audits, not every Headroom capability. Neither
+the smoke test nor integration tests establish provider cost savings.
+
+The cache-off comparison's prepared ChatAnthropic payload has zero `cache_control` fields,
+`context_management=None`, and empty extra model kwargs. Installed LangChain composition verifies
+projection → optional caching → metering → model. Usage conversion preserves all cache buckets
+without double counting. These are local SDK checks, not new provider calls.
 
 Sources: [upstream metadata](https://github.com/headroomlabs-ai/headroom/blob/main/pyproject.toml),
 [integration guide](https://github.com/headroomlabs-ai/headroom/blob/main/wiki/integration-guide.md).
+
+## Deferred integrations
 
 ### Deep Agents filesystem
 
@@ -136,9 +188,9 @@ Source: [Deep Agents backends](https://docs.langchain.com/oss/python/deepagents/
 
 ## Intentional limitations and verification still needed
 
-- The first live pilot verified model access, real cache usage and usage-derived cost accounting.
-  No active compaction occurred, so cost savings and post-compaction quality remain unverified.
-  Provider invoice reconciliation is still outstanding.
+- The first pilot verified model access, caching and cost accounting. The second comparison verified
+  active ContextLab compaction and correct short-task output after recall, but all long tasks failed.
+  Repeatable savings, broad post-compaction quality and invoice reconciliation remain outstanding.
 - System/tool cache formatting is checked offline; live receipts confirmed cache use for the selected
   model and account. Availability and cache behavior for other configurations remain unverified.
 - Archive and projection state survive adapter restart when canonical message history is supplied

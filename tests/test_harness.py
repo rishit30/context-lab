@@ -67,6 +67,6 @@ def test_report_labels_simulation_and_escapes_untrusted_text(tmp_path: Path):
 
 def test_config_rejects_fake_competitor_arm():
     config = load_config().model_dump()
-    config["arms"] = ["headroom"]
+    config["arms"] = ["deepagents"]
     with pytest.raises(ValueError):
         type(load_config()).model_validate(config)

@@ -1,0 +1,15 @@
+# Real Claude calls only when launched with the reviewed plan digest.
+# Locally generated audit files are fixtures; agent responses are never scripted.
+arms: [baseline, contextlab, headroom]
+tasks: [file_audit_long, file_audit_short]
+repeats: 1
+session_cap_usd: '3.00'
+experiment_cap_usd: '18.00'
+max_model_calls: 48
+max_output_tokens: 4096
+max_input_tokens: 100000
+threshold_tokens: 12000
+threshold_keep: 3
+docker_image: contextlab-task:local
+cache_mode: disabled
+phase_boundaries: true

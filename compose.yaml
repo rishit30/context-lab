@@ -1,0 +1,19 @@
+services:
+  contextlab:
+    build: .
+    image: contextlab:local
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    volumes:
+      - contextlab-runs:/app/runs
+    # Offline by default. No API keys, Docker socket, host workspace or network.
+    network_mode: none
+    command: [demo]
+
+volumes:
+  contextlab-runs:

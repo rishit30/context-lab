@@ -5,6 +5,10 @@ from typing import Any
 
 from contextlab.core.models import Chunk, Event, Signal
 
+# This tag identifies an event emitted through the explicit adapter control API.
+# Tool observations and user text are never parsed into this event kind or role.
+TRUSTED_BOUNDARY_SOURCE = "contextlab.harness.mark_boundary/v1"
+
 
 def _field(event: Event, name: str, default: Any = None) -> Any:
     return event.metadata.get(name, event.args.get(name, default))
@@ -135,6 +139,29 @@ def test_pass_boundary(events: Sequence[Event]) -> str | None:
             boundary = event.id
         latest[key] = event
     return boundary
+
+
+def is_trusted_phase_boundary(event: Event) -> bool:
+    return (
+        event.kind == "phase_boundary"
+        and event.role == "system"
+        and not event.tool_name
+        and not event.tool_call_id
+        and event.metadata.get("source") == TRUSTED_BOUNDARY_SOURCE
+        and event.metadata.get("trusted") is True
+    )
+
+
+def workflow_boundary(events: Sequence[Event]) -> str | None:
+    """Latest real fail→pass transition or explicitly trusted harness boundary.
+
+    A phase boundary permits evaluating a plan; it is never evidence that any
+    particular output is stale. Ordinary message content cannot create one.
+    """
+    passing_id = test_pass_boundary(events)
+    candidates = [event for event in events
+                  if event.id == passing_id or is_trusted_phase_boundary(event)]
+    return max(candidates, key=lambda event: event.seq).id if candidates else None
 
 
 def recalled_chunk_ids(events: Sequence[Event]) -> set[str]:

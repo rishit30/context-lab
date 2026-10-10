@@ -340,6 +340,17 @@ class LedgerStore:
                            "error": result.error, "rebuilt": result.rebuilt,
                            "estimated_tokens_saved": result.estimated_tokens_saved}),
                     None, 0, "0", int(bool(result.decision and result.decision.accepted)), int(result.fallback)))
+            if result.semantic_decision is not None:
+                payload = result.semantic_decision
+                identifier = hashlib.sha256(_json([
+                    session_id, seq, "semantic_relevance", payload,
+                ]).encode()).hexdigest()
+                # This row describes the assessment. All financial charges live in
+                # model_calls, including failed/unknown-usage decision attempts.
+                db.execute("INSERT OR IGNORE INTO decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (
+                    identifier, session_id, seq, "semantic_relevance",
+                    str(payload.get("engine", "jev")), "{}", _json(payload), None, 0, "0",
+                    int(bool(payload.get("allowed_ids"))), int(bool(payload.get("fallback")))))
 
     def get_projection(self, session_id: str) -> ProjectionResult | None:
         row = self.connection.execute("SELECT record_json FROM projection_states WHERE session_id=?", (session_id,)).fetchone()
@@ -386,8 +397,19 @@ class LedgerStore:
             raise KeyError("Unknown session")
         calls = self.list_model_calls(session_id)
         usage = {field: sum(getattr(call.usage, field) for call in calls) for field in Usage.model_fields}
+        decisions = [call for call in calls if call.purpose == "decision"]
+        decision_usage = {field: sum(getattr(call.usage, field) for call in decisions)
+                          for field in Usage.model_fields}
+        decision_reserved = self.connection.execute(
+            "SELECT amount_usd FROM reservations WHERE session_id=? AND purpose='decision' AND status='reserved'",
+            (session_id,),
+        ).fetchall()
         return {**dict(session), "cost_usd": sum((call.cost_usd for call in calls), Decimal("0")),
                 "usage": Usage(**usage), "model_calls": len(calls),
+                "decision_calls": len(decisions),
+                "decision_cost_usd": sum((call.cost_usd for call in decisions), Decimal("0")),
+                "decision_usage": Usage(**decision_usage),
+                "decision_reserved_usd": sum((Decimal(row[0]) for row in decision_reserved), Decimal("0")),
                 "failed_calls": sum(call.status != "ok" for call in calls),
                 "unknown_usage_calls": sum(call.status == "unknown_usage" for call in calls),
                 "recalls": self.connection.execute("SELECT COUNT(*) FROM recalls WHERE session_id=?", (session_id,)).fetchone()[0],
