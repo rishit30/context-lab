@@ -5,8 +5,10 @@ the task. ContextLab controls which archived tool outputs Claude sees next. Jev
 can assess information loss before a proposed context reduction. SQLite records
 the original outputs, decisions, provider receipts, reservations and charges.
 
-The runnable MVP is the Python integration and evaluation tooling. It is not an
-HTTP proxy, an autonomous model router or a production multi-tenant service.
+The runnable MVP is the Python integration and evaluation tooling. Optional
+[bounded evidence routing](routing.md) adds a read-only worker and five-arm
+comparison. It is not an HTTP proxy, arbitrary task router or production
+multi-tenant service.
 
 For testing without provider spending, follow [offline validation](offline-validation.md).
 `python -m harness xray RUN_DIRECTORY` analyzes saved baseline histories without
@@ -217,5 +219,5 @@ isolated executor.
 
 Paid validation of this revision must follow review of its new plan. Previous
 live results do not validate the updated policy. Repeatable cost/quality gains,
-reliable long-task performance, model delegation, learned memory policies,
+reliable long-task performance, broader and write-capable delegation, learned memory policies,
 streaming/async integrations and a multi-tenant HTTP gateway remain separate work.

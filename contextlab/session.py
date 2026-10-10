@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
@@ -18,12 +19,18 @@ from uuid import uuid4
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.tools import BaseTool, ToolException, tool
+from langchain_core.tools import BaseTool, InjectedToolCallId, ToolException, tool
 from pydantic import Field, model_validator
 
 from contextlab.adapters.langchain_mw import ContextLabMiddleware, MeteringMiddleware
 from contextlab.core.controller import ContextController
 from contextlab.core.models import CompactionConfig, Pricing, Record
+from contextlab.core.routing import (
+    EvidenceSource,
+    EvidenceTask,
+    RoutingConfig,
+    build_evidence_brief,
+)
 from contextlab.ledger.budget import BudgetExceeded, BudgetManager
 from contextlab.ledger.pricing import price_usage, worst_case_cost
 from contextlab.ledger.store import LedgerStore, ModelCall
@@ -33,7 +40,9 @@ from contextlab.providers.jev_config import JevConfig
 class SessionConfig(Record):
     """Immutable limits and pricing for one application-owned agent session."""
     pricing: Pricing
-    arm: Literal["baseline", "contextlab", "headroom"] = "contextlab"
+    arm: Literal["baseline", "cl_compact_only", "cl_route_only", "contextlab", "headroom"] = "contextlab"
+    mode: Literal["live", "simulation"] = "live"
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
     shadow: bool = False
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     session_cap_usd: Decimal = Field(default=Decimal("3"), gt=0, allow_inf_nan=False)
@@ -47,10 +56,20 @@ class SessionConfig(Record):
 
     @model_validator(mode="after")
     def consistent(self) -> SessionConfig:
-        if self.pricing.source == "synthetic" or not self.pricing.verified_at:
+        if self.mode == "live" and (self.pricing.source == "synthetic" or not self.pricing.verified_at):
             raise ValueError("Use dated, verified provider pricing for the live session API")
-        if self.arm != "contextlab" and (self.shadow or self.decision_engine != "rules"):
+        if self.arm not in {"contextlab", "cl_compact_only"} and (self.shadow or self.decision_engine != "rules"):
             raise ValueError("Jev and shadow mode belong only to the ContextLab arm")
+        if self.routing.enabled and self.arm not in {"contextlab", "cl_route_only"}:
+            raise ValueError("Routing belongs only to the combined or routing-only arm")
+        worker = self.routing.worker_pricing if self.routing.enabled else None
+        if self.mode == "live" and worker is not None and (worker.source == "synthetic" or not worker.verified_at):
+            raise ValueError("Use dated, verified worker pricing for live routing")
+        if self.mode == "simulation":
+            if self.pricing.source != "synthetic" or (worker is not None and worker.source != "synthetic"):
+                raise ValueError("Simulation requires explicitly synthetic pricing")
+            if self.decision_engine != "rules" or self.routing.engine != "rules":
+                raise ValueError("Simulation does not permit real Jev decisions")
         reserve = worst_case_cost(self.max_input_tokens, self.max_output_tokens, self.pricing)
         if reserve > min(self.session_cap_usd, self.experiment_cap_usd):
             raise ValueError("Caps must cover one worst-case model call")
@@ -65,10 +84,18 @@ class ContextLabSession:
     not your graph's checkpoint. Custom tools are the application's responsibility.
     """
     def __init__(self, ledger_path: Path, session_id: str, config: SessionConfig, *,
-                 experiment_id: str = "default") -> None:
+                 experiment_id: str = "default",
+                 model_factory: Callable[[SessionConfig], Any] | None = None,
+                 worker_factory: Callable[[RoutingConfig], Any] | None = None) -> None:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", session_id):
             raise ValueError("Use a 1–80 character alphanumeric session ID with - or _")
+        config = SessionConfig.model_validate(config.model_dump(), strict=True)
+        if config.mode == "live" and (model_factory is not None or worker_factory is not None):
+            raise ValueError("Injected providers are allowed only in explicit simulation mode")
+        if config.mode == "simulation" and (model_factory is None or (config.routing.enabled and worker_factory is None)):
+            raise ValueError("Simulation requires explicit model factories for every invoked provider")
         self.config, self.session_id = config, session_id
+        self._model_factory, self._worker_factory = model_factory, worker_factory
         self.store = LedgerStore(ledger_path)
         self._pending: dict[str, Any] = {}
         self._admitted_projection_indices: set[int] = set()
@@ -78,14 +105,15 @@ class ContextLabSession:
         self.gate = None
         self.middleware = None
         self.headroom = None
+        self.router = None
         try:
             fingerprint = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
             self.store.create_session(session_id, config.arm, "application-agent",
                                       model_main=config.pricing.model, config_hash=fingerprint,
-                                      mode="live", experiment_id=experiment_id)
+                                      mode=config.mode, experiment_id=experiment_id)
             self.budgets = BudgetManager(self.store, config.session_cap_usd,
                                          config.experiment_cap_usd, experiment_id)
-            if config.arm == "contextlab":
+            if config.arm in {"contextlab", "cl_compact_only"}:
                 if config.decision_engine == "jev":
                     from contextlab.providers.jev import JevClient
                     from contextlab.providers.jev_gate import JevDecisionGate
@@ -127,6 +155,11 @@ class ContextLabSession:
                 self.gate.reconcile_pending()
             except Exception as exc:
                 failure = exc
+        if self.router is not None:
+            try:
+                self.router.reconcile_pending()
+            except Exception as exc:
+                failure = failure or exc
         if self._pending:
             try:
                 self.budgets.settle(self._pending["id"], self._pending.get("record"))
@@ -205,6 +238,7 @@ class ContextLabSession:
         else:
             record = ModelCall(**common, usage=usage, pricing=self.config.pricing,
                                cost_usd=price_usage(usage, self.config.pricing),
+                               cost_basis="simulation" if self.config.mode == "simulation" else "usage",
                                status="ok" if status == "ok" else "failed", error=error_type)
         pending["record"] = record
         self.budgets.settle(pending["id"], record)
@@ -239,7 +273,45 @@ class ContextLabSession:
         recall.handle_validation_error = "Invalid recall range or ID; use the supplied signpost."
         return recall
 
-    def build_agent(self, *, tools: list[BaseTool], system_prompt: str) -> Any:
+    def evidence_tool(self, sources: Sequence[EvidenceSource]) -> BaseTool:
+        """Bind a frozen catalog and expose the same read-only tool in every arm."""
+        from contextlab.routing import DelegationRouter
+
+        if not 1 <= len(sources) <= 64:
+            raise ValueError("Supply between one and 64 source snapshots")
+        snapshots = tuple(EvidenceSource.model_validate(source.model_dump(), strict=True) for source in sources)
+        if len({source.id for source in snapshots}) != len(snapshots):
+            raise ValueError("Source IDs must be unique")
+        catalog = json.dumps([source.model_dump(mode="json") for source in sorted(snapshots, key=lambda s: s.id)],
+                             sort_keys=True, separators=(",", ":"))
+        self.store.bind_evidence_catalog(self.session_id, hashlib.sha256(catalog.encode()).hexdigest())
+        if self.router is None:
+            self.router = DelegationRouter(self.store, self.budgets, self.session_id,
+                                           main_pricing=self.config.pricing, config=self.config.routing,
+                                           jev_config=self.config.jev, worker_factory=self._worker_factory)
+        session = self
+
+        @tool
+        def analyze_files(goal: str, questions: dict[str, str], source_ids: list[str],
+                          tool_call_id: Annotated[str, InjectedToolCallId]) -> str:
+            """Select evidence for questions from named read-only snapshots. Check quote relevance and completeness; use read_file for full originals when needed."""
+            if session._closed:
+                raise RuntimeError("Session is closed")
+            try:
+                task = EvidenceTask(goal=goal, questions=questions, source_ids=tuple(source_ids))
+                # Input validation is recoverable; ledger/provider failures below must propagate.
+                build_evidence_brief(task, snapshots, session.config.routing)
+            except ValueError:
+                raise ToolException("Invalid or oversized evidence request. Use supplied source IDs and bounded questions, or read_file for original files.") from None
+            outcome = session.router.analyze(task, snapshots, request_id=tool_call_id)
+            return outcome.tool_payload_json()
+
+        analyze_files.handle_tool_error = True
+        analyze_files.handle_validation_error = "Invalid evidence request; use a goal, question map, and supplied source IDs."
+        return analyze_files
+
+    def build_agent(self, *, tools: list[BaseTool], system_prompt: str,
+                    evidence_sources: Sequence[EvidenceSource] | None = None) -> Any:
         """Create the real Claude agent; no network until the returned graph is invoked."""
         if self._closed or self._built:
             raise RuntimeError("Build one agent per open ContextLabSession")
@@ -248,7 +320,14 @@ class ContextLabSession:
             raise ValueError("Disable LangSmith/LangChain tracing for this local-only session")
         if any(item.name == "recall" for item in tools):
             raise ValueError("The session owns the recall tool; remove a duplicate recall definition")
-        model = ChatAnthropic(model_name=self.config.pricing.model,
+        if evidence_sources is not None and any(item.name == "analyze_files" for item in tools):
+            raise ValueError("The session owns analyze_files when evidence_sources are supplied")
+        if self.config.routing.enabled and evidence_sources is None:
+            raise ValueError("Enabled routing requires explicit immutable evidence_sources")
+        bound_tools = [*tools, self.recall_tool()]
+        if evidence_sources is not None:
+            bound_tools.append(self.evidence_tool(evidence_sources))
+        model = self._model_factory(self.config) if self._model_factory is not None else ChatAnthropic(model_name=self.config.pricing.model,
                               max_tokens=self.config.max_output_tokens,
                               max_retries=0, timeout=60, temperature=0)
         middlewares: list[Any] = []
@@ -262,7 +341,7 @@ class ContextLabSession:
             model_name=self.config.pricing.model, before_call=self._admit, on_usage=self._settle,
             max_model_calls=self.config.max_model_calls,
         ))
-        graph = create_agent(model=model, tools=[*tools, self.recall_tool()],
+        graph = create_agent(model=model, tools=bound_tools,
                              system_prompt=system_prompt, middleware=middlewares)
         self._built = True
         return graph
@@ -282,6 +361,7 @@ class ContextLabSession:
         calls = self.store.list_model_calls(self.session_id)
         recorded = sum((call.cost_usd for call in calls), Decimal("0"))
         decisions = [call for call in calls if call.purpose == "decision"]
+        delegates = [call for call in calls if call.purpose == "delegate"]
         raw_telemetry = (self.middleware.telemetry if self.middleware is not None else
                          self.headroom.telemetry if self.headroom is not None else [])
         telemetry = [{**item, "admitted": index in self._admitted_projection_indices}
@@ -297,12 +377,21 @@ class ContextLabSession:
         elif unknown_usage_calls:
             cost_basis = ("Includes conservative reservation charges for unknown usage; "
                           "reconcile before comparing costs. Decision fees are included.")
+        if self.config.mode == "simulation":
+            cost_basis = "Simulation only: deterministic fixture usage and synthetic prices; no provider spend or measured savings."
         return {
-            "session_id": self.session_id, "arm": self.config.arm,
+            "session_id": self.session_id, "arm": self.config.arm, "mode": self.config.mode,
+            "provider_spend_usd": "0" if self.config.mode == "simulation" else None,
             "total_cost_usd": str(recorded + reserved), "provider_calls": len(calls),
             "recorded_cost_usd": str(recorded), "unsettled_reservations_usd": str(reserved),
             "unknown_usage_calls": unknown_usage_calls,
             "decision_calls": len(decisions),
+            "delegate_calls": len(delegates),
+            "delegate_cost_usd": str(sum((call.cost_usd for call in delegates), Decimal("0")) + sum(
+                (Decimal(row[0]) for row in self.store.connection.execute(
+                    "SELECT amount_usd FROM reservations WHERE session_id=? AND purpose='delegate' AND status='reserved'",
+                    (self.session_id,),
+                )), Decimal("0"))),
             "decision_cost_usd": str(sum((call.cost_usd for call in decisions), Decimal("0")) + decision_reserved),
             "usage": {field: sum(getattr(call.usage, field) for call in calls)
                       for field in ("input_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",

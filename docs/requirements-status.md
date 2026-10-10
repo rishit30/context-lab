@@ -12,11 +12,11 @@ and `architecture-original.md`. Current corrections are in `architecture.md`.
 | --- | --- | --- |
 | M0: archive, tool protocol, budgets, accounting | Implemented; immutable originals, recall, provider receipts, reservations and failure accounting | Current revision needs fresh approved live verification; old runs retain their original source snapshots |
 | Python/LangChain integration | Public `ContextLabSession`, real file-reading example, baseline/ContextLab/Headroom configurations | Representative real workflows; synchronous, one active instance per session remains the supported scope |
-| Packaging | Installable Python package, software Docker image, isolated task image, CI configuration | CI must run on GitHub; Compose was supplied but its plugin was unavailable locally |
+| Packaging | Installable Python package, software Docker image, isolated task image, CI configuration; MVP PR #1 merged; routing wheel and offline Docker checks passed locally | Routing CI status is recorded on its PR; Compose was supplied but its plugin was unavailable locally |
 | M1: signals and context analysis | Covering reads, resolved test logs, visibility levels, recall, timelines; offline candidate-context analyzer added | Richer symbol/error/test references, additional safe signals, six representative tasks and the original repeated live matrix remain incomplete |
 | M2: economics and evaluation | Fixed-prior cost forecasts, cache-price handling, cost per solved task, all attempted-work cost | Learned turn/recall estimates, additional boundaries, DeepAgents comparator, calibrated uncertainty and repeated evaluation |
-| M3: routing by delegation | Not implemented; routing remains disabled | Brief construction, cheaper delegate, typed acceptance, isolated changes, escalation, complete cost accounting and component ablations |
-| Jev decisions | Real transport and metering; a conservative semantic veto on eligible context reductions | Calibration and live validation of the revised information-loss question; this is not task-model routing |
+| M3: routing by delegation | Opt-in read-only evidence worker, bounded briefs, exact quote validation, metered failures/fallback, durable request identity and five-arm offline comparison | Representative real-model quality/cost acceptance; arbitrary and write-capable delegates, isolated patch merging and broader task acceptance remain deferred |
+| Jev decisions | Real transport and metering; separate optional vetoes for context information loss and read-only routing suitability | Calibration and live validation of both revised decisions; Jev does not execute the task or choose arbitrary models |
 | M4: triage and recall learning | Shadow mode and optional semantic assessment | Verbatim segment extraction, omission tests, learned recall priors and combined Headroom/ContextLab evaluation |
 | M5: conversation memory | Schema placeholders only | Versioned facts, hybrid retrieval, query routing, evidence checks and independently graded conversation suite |
 | M6: HTTP gateway | Deferred by user preference | Authenticated session identity, protocol/streaming/cancellation/retry tests and provider cache evidence if resumed |
@@ -45,6 +45,7 @@ not Claude answer quality or measured savings.
 - Code changes invalidate earlier live-plan digests. Historical plan files and
   results must remain unchanged; a future approved run needs a newly printed plan.
 
-Next: use the offline evidence to improve task selection and compaction safety,
-then evaluate current behavior on representative approved live runs before making
-an optimization claim or treating the compaction evidence gate as passed.
+Next: verify the opt-in routing mechanics with the five-arm offline demonstration
+in [routing.md](routing.md), then evaluate current behavior on representative
+approved live runs before making an optimization claim or treating either the
+compaction or routing evidence gate as passed.

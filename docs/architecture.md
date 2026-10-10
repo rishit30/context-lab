@@ -1,4 +1,4 @@
-# ContextLab implementation architecture — v0.6
+# ContextLab implementation architecture — v0.7
 
 This document governs the implemented Python MVP and partial M1 analysis tooling. `architecture-original.md` and `implementation-brief-original.md` preserve the supplied proposal unchanged. Their statements about superiority, cache guarantees, forever-retention, and minimum sample sizes are hypotheses or have been corrected below. `requirements-status.md` maps the original scope to implementation and acceptance gaps.
 
@@ -8,7 +8,7 @@ The product combines an embeddable context controller with an evidence console. 
 
 The current completion target is the Python/LangChain MVP, as requested by the user. `contextlab/session.py` is the public budgeted integration, `examples/file_agent.py` is a real read-only Claude agent in three middleware configurations, and `Dockerfile` packages the runnable software. `harness audit` verifies saved accounting without inference. The HTTP gateway is deferred by explicit preference. See `python-integration.md` for the complete operator/developer workflow.
 
-M0 implements compaction and instrumentation in one synchronous LangChain/Anthropic adapter. Routing by bounded delegation remains M3. The local offline demonstration exercises the actual mechanics but deliberately does not claim real model savings or quality.
+M0 implements compaction and instrumentation in one synchronous LangChain/Anthropic adapter. A partial M3 now adds opt-in, bounded read-only evidence delegation; see `routing.md`. The local offline demonstrations exercise actual mechanics but deliberately do not claim real model savings or quality.
 
 An optional Jev relevance gate now extends the context controller. This is a semantic veto over rules-eligible reductions, not task-model routing. Live inference and accounting passed in the first Jev pilot, which stopped on an invalid recall call. After shared tool-input recovery fixes, a fresh baseline/ContextLab+Jev/Headroom short-task comparison passed all three arms. Both middlewares made zero context changes, so different observed costs do not establish optimization savings. Rules remain the default for historical configurations.
 
@@ -55,7 +55,7 @@ Future benchmark traces record public-completion markers with a versioned source
 
 `core/models.py` contains typed Event, Chunk, Signal, Pricing, Usage, CompactionConfig, CostInputs, CostDecision, ViewState, ProjectionResult and RunResult schemas. Money uses Decimal. Forecast token estimates are distinct from API usage.
 
-The ledger includes the original proposal's sessions, events, chunks, refs, signals, visibility, epochs, decisions, recalls, model_calls, delegations and facts tables. Additional tables store budgets, reservations and latest projection state. Delegations/facts are schema-only at M0.
+The ledger includes the original proposal's sessions, events, chunks, refs, signals, visibility, epochs, decisions, recalls, model_calls, delegations and facts tables. Additional tables store budgets, reservations, latest projection state and immutable evidence-catalog contracts. Delegations now record durable request claims and receipt-linked outcomes; facts remain schema-only.
 
 ## Gaps to resolve in later milestones
 
@@ -64,7 +64,7 @@ The ledger includes the original proposal's sessions, events, chunks, refs, sign
 | M0 live gate | Historical pilots verified integration and receipt accounting; the current revision still needs fresh approved live verification. |
 | M1 | X-ray and offline historical-evidence/long-trajectory scenarios are implemented. Richer references/signals, six representative tasks and repeated live acceptance remain incomplete. Candidate-context share is neither proven waste nor a savings ceiling. |
 | M2 | Calibrate remaining-turn/recall priors on held-out runs, add real competitors, control cold/warm cache conditions and cross-arm sharing, and report task-stratified uncertainty. Three repeats are only an initial pilot. |
-| M3 | Delegate an explicit subtask with typed acceptance criteria. Run write-capable delegates on isolated snapshots; merge a validated patch atomically or discard it. Maintain a single main model and charge failed delegates, retries and escalation. Never treat model self-approval as sufficient. |
+| M3 | Read-only evidence extraction is implemented with a single main model, bounded worker, exact-source validation and charged failure/fallback. Validate real task quality and all-in cost next. Write-capable delegates still require isolated snapshots and independently validated atomic patch merging. Never treat model self-approval as sufficient. |
 | M4 | Make segment extraction verbatim and test omission failures. Avoid double offloading when composing middleware. Learn priors without training/evaluating on the same trajectories. |
 | M5 | Version facts by entity, scope and effective time; enforce access before retrieval; carry pending recent events; compute exhaustive aggregations in code; bound evidence retrieval. |
 | M6 | Require explicit authenticated tenant/session IDs. A hash of system prompt plus first message can collide across users and is not an authorization boundary. Validate streaming, cancellation, retries and idempotency. Replayed requests test protocol/determinism, not provider cache hits. |

@@ -151,6 +151,9 @@ CREATE TABLE IF NOT EXISTS reservations (
 CREATE TABLE IF NOT EXISTS projection_states (
  session_id TEXT PRIMARY KEY REFERENCES sessions(id), seq INTEGER NOT NULL, record_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_contracts (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(id), evidence_catalog_sha256 TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS events_order ON events(session_id,seq);
 CREATE INDEX IF NOT EXISTS calls_session ON model_calls(session_id);
 CREATE INDEX IF NOT EXISTS reservations_experiment ON reservations(experiment_id,status);
@@ -220,6 +223,18 @@ class LedgerStore:
             cursor = db.execute("UPDATE sessions SET ended_at=?,solved=?,notes=? WHERE id=?", (now(), int(solved), notes, session_id))
             if cursor.rowcount != 1:
                 raise KeyError("Unknown session")
+
+    def bind_evidence_catalog(self, session_id: str, fingerprint: str) -> None:
+        """Bind caller-owned source snapshots to a session, including after restart."""
+        if (not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in fingerprint)):
+            raise ValueError("Evidence catalog fingerprint must be a SHA-256 hex digest")
+        with self.transaction() as db:
+            row = db.execute("SELECT evidence_catalog_sha256 FROM session_contracts WHERE session_id=?",
+                             (session_id,)).fetchone()
+            if row and row[0] != fingerprint:
+                raise LedgerConflict("Session evidence catalog differs from its persisted contract")
+            db.execute("INSERT OR IGNORE INTO session_contracts VALUES(?,?)", (session_id, fingerprint))
 
     def append_event(self, event: Event) -> bool:
         serialized = _json(event)
