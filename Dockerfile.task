@@ -1,0 +1,6 @@
+# Local diagnostic runner; pin an approved image digest before production deployment.
+FROM python:3.13.12-slim
+RUN pip install --no-cache-dir pytest==9.1.1
+ENV PYTHONDONTWRITEBYTECODE=1
+WORKDIR /workspace
+USER 65534:65534

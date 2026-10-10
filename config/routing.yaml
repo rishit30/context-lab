@@ -1,0 +1,2 @@
+enabled: false
+reason: Delegation follows the compaction evidence gate; no model routing is active in M0.

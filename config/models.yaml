@@ -1,0 +1,4 @@
+main: claude-sonnet-4-6
+# Routing is a later milestone; these roles are not invoked in this release.
+cheap: null
+decision: null

@@ -1,0 +1,13 @@
+arms: [baseline, threshold_edit, contextlab]
+tasks: [retry_policy, inventory, config_parser]
+repeats: 1
+session_cap_usd: '2.00'
+experiment_cap_usd: '10.00'
+max_model_calls: 24
+max_output_tokens: 2048
+max_input_tokens: 100000
+threshold_tokens: 12000
+threshold_keep: 3
+docker_image: contextlab-task:local
+# The CLI prints the exact run matrix and plan digest before a live launch.
+# Live execution needs --approve-plan <digest>; no live calls in demo/check/plan.

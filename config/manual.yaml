@@ -1,0 +1,14 @@
+# One-session smoke test for learning how to run the middleware.
+# Live API spend starts only with the run command and a reviewed plan digest.
+# This short task may not trigger compaction; use demo to inspect the mechanics.
+arms: [contextlab]
+tasks: [retry_policy]
+repeats: 1
+session_cap_usd: '2.00'
+experiment_cap_usd: '2.00'
+max_model_calls: 24
+max_output_tokens: 2048
+max_input_tokens: 100000
+threshold_tokens: 12000
+threshold_keep: 3
+docker_image: contextlab-task:local

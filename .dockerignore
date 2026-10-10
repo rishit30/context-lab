@@ -1,0 +1,4 @@
+# The task image installs only its test runner; it needs no host source or secrets.
+**
+!Dockerfile.task
+!.dockerignore

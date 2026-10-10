@@ -1,0 +1,7 @@
+remaining_turns: 8
+safety_factor: '1.2'
+recent_outputs: 2
+recall_probability: '0.1'
+expected_recall_cost_usd: '0.01'
+policy_cost_usd: '0'
+min_saved_tokens: 128

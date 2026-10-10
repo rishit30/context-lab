@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contextlab"
+version = "0.1.0"
+description = "Auditable context lifecycle decisions for tool-using agents"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+  "pydantic==2.14.0", "PyYAML==6.0.3", "jinja2==3.1.6",
+  "langchain==1.4.4", "langchain-anthropic==1.7.5", "anthropic==1.13.0",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.17.0", "mypy==2.4.0", "types-PyYAML==6.0.12.20260906"]
+
+[project.scripts]
+contextlab = "harness.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["contextlab*", "harness*"]
+
+[tool.setuptools.package-data]
+harness = ["report/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["contextlab/core"]
